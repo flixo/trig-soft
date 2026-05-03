@@ -52,6 +52,30 @@ Expected startup flow:
 - Select first claimable/best-priority interface.
 - Start time send loop and clipboard command handling.
 
+## GitHub Actions release binaries
+
+This repo includes a GitHub Actions workflow at [.github/workflows/release.yml](.github/workflows/release.yml) that builds release binaries for:
+
+- Linux x86_64 (`x86_64-unknown-linux-gnu`)
+- Windows x86_64 (`x86_64-pc-windows-msvc`)
+
+Workflow behavior:
+
+- Pull requests and pushes to `main`: build + upload workflow artifacts.
+- Tags like `v1.0.0`: build binaries and publish a GitHub Release with attached archives.
+
+To create a release:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Generated assets:
+
+- `trig-soft-linux-x86_64.tar.gz`
+- `trig-soft-windows-x86_64.zip`
+
 ## Troubleshooting
 
 - `No matching device found for 'Trig'`:
