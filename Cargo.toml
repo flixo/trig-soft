@@ -1,0 +1,9 @@
+[package]
+name = "trig-soft"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+arboard = { version = "3.4", features = ["wayland-data-control"] }
+nusb = "0.2"
+pollster = "0.4"
