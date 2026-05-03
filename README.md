@@ -1,19 +1,39 @@
 # trig-soft
 
-Cross-platform clipboard poller for Linux (Wayland) and Windows 11.
+Host-side bridge between a Trig USB HID device and the desktop clipboard.
 
-## Current scope
+## What it does
 
-The app reads the text clipboard every second and prints changes.
+`trig-soft` continuously looks for HID devices whose product or manufacturer name contains `Trig`, selects the best RAW HID-style interface, and then:
+
+- Sends current Unix time to the device every 1 second (`time` tag).
+- Listens for inbound RAW HID reports from the device.
+- Handles clipboard sync commands:
+	- `past`: device requests paste value from host clipboard.
+	- `copy`: device sends value to copy into host clipboard.
+
+All reports are fixed-size 32-byte payloads.
+
+## Clipboard behavior
+
+- Linux: reads/writes both `Clipboard` and `Primary` selections through `arboard` Linux extensions.
+- Windows: uses standard clipboard read/write through `arboard`.
+
+When serving a `past` request, clipboard text is parsed as a number, normalized, and sent back using the `inpt` tag.
+
+## HID transport by platform
+
+- Windows: uses `hidapi` backend (HID-class access) to avoid interface-claim issues with driver-bound HID interfaces.
+- Non-Windows: uses `nusb` backend and claims the selected HID interface.
 
 ## Requirements
 
-- Rust toolchain (stable)
-- Linux Wayland session or Windows 11 desktop session
+- Rust 1.93 (pinned via [rust-toolchain.toml](rust-toolchain.toml)).
+- A connected Trig HID device.
 
-### Linux (Wayland)
+### Linux notes
 
-Install Wayland clipboard tooling:
+Wayland clipboard tools may be required by your distro:
 
 - Debian/Ubuntu: `sudo apt install wl-clipboard`
 - Fedora: `sudo dnf install wl-clipboard`
@@ -25,8 +45,18 @@ Install Wayland clipboard tooling:
 cargo run
 ```
 
-Copy something new and the app will print the updated clipboard value.
+Expected startup flow:
 
-## Next step
+- Poll for matching Trig device every 2s.
+- Print matched interfaces.
+- Select first claimable/best-priority interface.
+- Start time send loop and clipboard command handling.
 
-This is the functionality check. After this, we can convert it into a proper background service/daemon process.
+## Troubleshooting
+
+- `No matching device found for 'Trig'`:
+	- Check USB connection and product/manufacturer string matching.
+- `No claimable interface found` on non-Windows:
+	- Interface is likely owned by another driver/process.
+- Clipboard errors:
+	- Ensure desktop clipboard service is available in current session.
