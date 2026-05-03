@@ -1,8 +1,14 @@
 use std::time::Duration;
 
+#[cfg(target_os = "windows")]
+use hidapi::HidApi;
+#[cfg(not(target_os = "windows"))]
 use nusb::descriptors::TransferType;
+#[cfg(not(target_os = "windows"))]
 use nusb::transfer::{Buffer, Direction, In, Interrupt, Out, TransferError};
+#[cfg(not(target_os = "windows"))]
 use nusb::transfer::{ControlOut, ControlType, Recipient};
+#[cfg(not(target_os = "windows"))]
 use nusb::MaybeFuture;
 
 pub struct HidDeviceSummary {
@@ -18,6 +24,19 @@ pub struct HidDeviceSummary {
     pub interface_class: u8,
     pub interface_subclass: u8,
     pub interface_protocol: u8,
+}
+
+fn device_bus(device: &nusb::DeviceInfo) -> Option<u8> {
+    #[cfg(target_os = "linux")]
+    {
+        Some(device.busnum())
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = device;
+        None
+    }
 }
 
 pub fn list_hid_devices() -> Result<Vec<HidDeviceSummary>, String> {
@@ -41,7 +60,7 @@ pub fn list_hid_devices() -> Result<Vec<HidDeviceSummary>, String> {
                 manufacturer: device.manufacturer_string().map(ToOwned::to_owned),
                 product: device.product_string().map(ToOwned::to_owned),
                 serial_number: device.serial_number().map(ToOwned::to_owned),
-                bus: Some(device.busnum()),
+                bus: device_bus(&device),
                 address: Some(device.device_address()),
                 interface_number: interface.interface_number(),
                 interface_class: interface.class(),
@@ -58,7 +77,7 @@ pub fn list_hid_devices() -> Result<Vec<HidDeviceSummary>, String> {
                 manufacturer: device.manufacturer_string().map(ToOwned::to_owned),
                 product: device.product_string().map(ToOwned::to_owned),
                 serial_number: device.serial_number().map(ToOwned::to_owned),
-                bus: Some(device.busnum()),
+                bus: device_bus(&device),
                 address: Some(device.device_address()),
                 interface_number: 0,
                 interface_class: 0x03,
@@ -72,6 +91,23 @@ pub fn list_hid_devices() -> Result<Vec<HidDeviceSummary>, String> {
 }
 
 pub fn send_output_report(
+    target: &HidDeviceSummary,
+    report_id: u8,
+    payload: &[u8],
+) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        return send_output_report_windows(target, report_id, payload);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        send_output_report_nusb(target, report_id, payload)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn send_output_report_nusb(
     target: &HidDeviceSummary,
     report_id: u8,
     payload: &[u8],
@@ -122,7 +158,49 @@ pub fn send_output_report(
         .map_err(|err| format!("HID SET_REPORT failed: {err}"))
 }
 
+#[cfg(target_os = "windows")]
+fn send_output_report_windows(
+    target: &HidDeviceSummary,
+    report_id: u8,
+    payload: &[u8],
+) -> Result<(), String> {
+    let device = open_target_hid_device(target)?;
+    let mut packet = Vec::with_capacity(payload.len() + 1);
+    packet.push(report_id);
+    packet.extend_from_slice(payload);
+
+    let written = device
+        .write(&packet)
+        .map_err(|err| format!("hid write failed: {err}"))?;
+
+    if written == packet.len() {
+        Ok(())
+    } else {
+        Err(format!(
+            "hid write was partial: wrote {written} of {} bytes",
+            packet.len()
+        ))
+    }
+}
+
 pub fn recv_input_report(
+    target: &HidDeviceSummary,
+    report_len: usize,
+    timeout: Duration,
+) -> Result<Option<Vec<u8>>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        return recv_input_report_windows(target, report_len, timeout);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        recv_input_report_nusb(target, report_len, timeout)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn recv_input_report_nusb(
     target: &HidDeviceSummary,
     report_len: usize,
     timeout: Duration,
@@ -175,6 +253,100 @@ pub fn recv_input_report(
     }
 }
 
+#[cfg(target_os = "windows")]
+fn recv_input_report_windows(
+    target: &HidDeviceSummary,
+    report_len: usize,
+    timeout: Duration,
+) -> Result<Option<Vec<u8>>, String> {
+    let device = open_target_hid_device(target)?;
+    let timeout_ms = timeout.as_millis().min(i32::MAX as u128) as i32;
+    let mut packet = vec![0u8; report_len.saturating_add(1)];
+
+    let read_len = device
+        .read_timeout(&mut packet, timeout_ms)
+        .map_err(|err| format!("hid read failed: {err}"))?;
+
+    if read_len == 0 {
+        return Ok(None);
+    }
+
+    let mut data = packet[..read_len].to_vec();
+
+    if !data.is_empty() && data[0] == 0 {
+        data.remove(0);
+    }
+
+    if data.len() > report_len {
+        data.truncate(report_len);
+    }
+
+    if data.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(data))
+    }
+}
+
+pub fn can_claim_interface(target: &HidDeviceSummary) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let _device = open_target_hid_device(target)?;
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        can_claim_interface_nusb(target)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn can_claim_interface_nusb(target: &HidDeviceSummary) -> Result<(), String> {
+    let device = open_target_device(target)?;
+    let _claimed = device
+        .detach_and_claim_interface(target.interface_number)
+        .wait()
+        .map_err(|err| format!("failed to claim interface {}: {err}", target.interface_number))?;
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn open_target_hid_device(target: &HidDeviceSummary) -> Result<hidapi::HidDevice, String> {
+    let api = HidApi::new().map_err(|err| format!("failed to initialize HID API: {err}"))?;
+
+    let serial_matches = |candidate: Option<&str>| match (&target.serial_number, candidate) {
+        (Some(expected), Some(actual)) => actual == expected,
+        (None, _) => true,
+        (Some(_), None) => false,
+    };
+
+    for info in api.device_list() {
+        if info.vendor_id() != target.vendor_id || info.product_id() != target.product_id {
+            continue;
+        }
+
+        if info.interface_number() != i32::from(target.interface_number) {
+            continue;
+        }
+
+        if !serial_matches(info.serial_number()) {
+            continue;
+        }
+
+        return info
+            .open_device(&api)
+            .map_err(|err| format!("failed to open HID interface {}: {err}", target.interface_number));
+    }
+
+    Err(format!(
+        "target HID interface {} is no longer available",
+        target.interface_number
+    ))
+}
+
+#[cfg(not(target_os = "windows"))]
 fn open_target_device(target: &HidDeviceSummary) -> Result<nusb::Device, String> {
     let mut devices = nusb::list_devices().wait().map_err(|err| err.to_string())?;
 
@@ -182,7 +354,7 @@ fn open_target_device(target: &HidDeviceSummary) -> Result<nusb::Device, String>
         .find(|d| {
             d.vendor_id() == target.vendor_id
                 && d.product_id() == target.product_id
-                && Some(d.busnum()) == target.bus
+                && device_bus(d) == target.bus
                 && Some(d.device_address()) == target.address
                 && d.serial_number().map(ToOwned::to_owned) == target.serial_number
         })

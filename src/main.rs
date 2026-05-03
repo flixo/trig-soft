@@ -2,7 +2,7 @@ mod hid_api;
 mod clipboard_api;
 
 use clipboard_api::ClipboardApi;
-use hid_api::{list_hid_devices, recv_input_report, send_output_report, HidDeviceSummary};
+use hid_api::{can_claim_interface, list_hid_devices, recv_input_report, send_output_report, HidDeviceSummary};
 use std::thread;
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -211,16 +211,6 @@ fn print_device(device: &hid_api::HidDeviceSummary) {
     );
 }
 
-fn choose_device(mut matched: Vec<HidDeviceSummary>) -> HidDeviceSummary {
-    matched.sort_by_key(device_priority);
-
-    if matched.len() > 1 {
-        println!("Multiple matched devices found; selecting the best RAW HID candidate.");
-    }
-
-    matched.remove(0)
-}
-
 fn device_priority(device: &HidDeviceSummary) -> (u8, u8) {
     let interface_score = if device.interface_class == 0x03
         && device.interface_subclass == 0x00
@@ -261,7 +251,32 @@ fn wait_for_target_device(target_name: &str) -> HidDeviceSummary {
                     print_device(device);
                 }
 
-                return choose_device(matched);
+                let mut candidates = matched;
+                candidates.sort_by_key(device_priority);
+
+                if candidates.len() > 1 {
+                    println!("Multiple matched devices found; selecting the best RAW HID candidate.");
+                }
+
+                for device in candidates {
+                    match can_claim_interface(&device) {
+                        Ok(()) => return device,
+                        Err(err) => {
+                            eprintln!(
+                                "Skipping interface {} ({:04x}:{:04x}) because it cannot be claimed: {err}",
+                                device.interface_number,
+                                device.vendor_id,
+                                device.product_id
+                            );
+                        }
+                    }
+                }
+
+                eprintln!(
+                    "No claimable interface found for '{target_name}'. Waiting..."
+                );
+                waiting_logged = true;
+                thread::sleep(POLL_INTERVAL);
             }
             Err(err) => {
                 if !waiting_logged {

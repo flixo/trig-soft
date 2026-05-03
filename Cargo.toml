@@ -2,8 +2,12 @@
 name = "trig-soft"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.93"
 
 [dependencies]
 arboard = { version = "3.4", features = ["wayland-data-control"] }
-nusb = "0.2"
+nusb = { version = "0.2", features = ["smol"] }
 pollster = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+hidapi = "2.6"
