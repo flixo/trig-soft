@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const TIME_SEND_INTERVAL: Duration = Duration::from_secs(1);
-const HOST_RX_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const HOST_RX_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const RAW_HID_REPORT_LEN: usize = 32;
 const TAG_TIME: &[u8; 4] = b"time";
 const TAG_PASTE_REQ: &[u8; 4] = b"past";
@@ -34,10 +34,7 @@ fn main() {
         if Instant::now() >= next_time_send_at {
             let payload = build_time_message();
             match send_output_report(&selected, 0, &payload) {
-                Ok(()) => {
-                    let ts = current_unix_timestamp();
-                    println!("sent time={ts}");
-                }
+                Ok(()) => {}
                 Err(err) => {
                     eprintln!("send failed: {err}");
                     if is_connection_error(&err) {
@@ -97,8 +94,6 @@ fn handle_keyboard_report(selected: &HidDeviceSummary, clipboard: &mut Clipboard
         let payload = build_tagged_text_message(TAG_INPUT_VAL, &normalized);
         if let Err(err) = send_output_report(selected, 0, &payload) {
             eprintln!("failed to send pasted value to keyboard: {err}");
-        } else {
-            println!("paste request served with value={normalized}");
         }
 
         let _ = offset;
@@ -113,7 +108,7 @@ fn handle_keyboard_report(selected: &HidDeviceSummary, clipboard: &mut Clipboard
         }
 
         match clipboard.write_text(&value) {
-            Ok(()) => println!("copied calculator value to host clipboard: {value}"),
+            Ok(()) => {}
             Err(err) => eprintln!("failed to write host clipboard: {err}"),
         }
     }
